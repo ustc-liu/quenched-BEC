@@ -1,0 +1,123 @@
+<simulation xmds-version="2">
+<name>short_time_imag</name>
+<author>Sheng Liu</author>
+<description>Calculate short time evolution of 2D SOC-BEC by propagating the GPE in imaginary time</description>
+<features>
+	<validation kind="run-time"/>
+	<arguments>
+		<argument default_value="-120.0" name="xmin" type="real"/>
+		<argument default_value="120.0" name="xmax" type="real"/>
+		<argument default_value="-120.0" name="ymin" type="real"/>
+		<argument default_value="120.0" name="ymax" type="real"/>
+	</arguments>
+	<auto_vectorise/>
+	<openmp/>
+	<bing/>
+	<fftw plan="patient" threads ="4" />
+	<globals>
+		<![CDATA[
+		const double U11 = 1;
+		const double U12 = 0.8;
+		const double Omega0 = 2;
+		const double gamma0 = 1;
+		const double eta0 = 5;
+		const double mu0 = 1;
+		]]>
+	</globals>
+</features>
+<geometry>
+<propagation_dimension>t </propagation_dimension>
+<transverse_dimensions>
+<dimension domain="(xmin, xmax)" lattice="480" name="x"/>
+<dimension domain="(ymin, ymax)" lattice="480" name="y"/>
+</transverse_dimensions>
+</geometry>
+<vector name="potential" dimensions="x y" type="real">
+	<components> V1 </components>
+    <initialisation kind = "hdf5"> 
+        <filename> CirclePotential_smooth.h5 </filename>
+    </initialisation>
+</vector>
+
+<vector name="init_wavefunction" dimensions="x y" type="real">
+    <components> phi0real phi0imag phi1real phi1imag </components>
+    <initialisation kind = "hdf5">
+        <filename> groundstate.h5 </filename>
+    </initialisation>
+</vector>
+
+<vector dimensions="x y" name="wavefunction" type="complex">
+<components> phi0 phi1</components>
+<initialisation>
+<dependencies> potential init_wavefunction</dependencies>
+<![CDATA[
+    phi0 = phi0real + i*phi0imag;
+    phi1 = phi1real + i*phi1imag;
+]]>
+</initialisation>
+</vector>
+
+<computed_vector dimensions="" name="normalisation" type="real">
+	<components>Ncalc </components>
+	<evaluation>
+	<dependencies basis="x y">wavefunction</dependencies>
+	<![CDATA[
+    // Calculate the current normalisation of the wave function.
+    Ncalc = mod2(phi0) + mod2(phi1);
+    ]]>
+	</evaluation>
+</computed_vector>
+
+<sequence cycles="1">
+<filter>
+	<![CDATA[
+	 printf("Hello world from a filter segment!\n");
+	]]>
+</filter>
+
+<integrate algorithm="ARK45" interval="10" steps="1000" tolerance="1e-5">
+<samples>1 1</samples>
+
+<operators>
+<operator kind="ex">
+<operator_names>T1 T2 T3</operator_names>
+	<![CDATA[
+	T1 = -0.5*(eta0+i)*(kx*kx+ky*ky) - (eta0+i)*gamma0*kx;
+	T2 = -0.5*(eta0+i)*(kx*kx+ky*ky) + (eta0+i)*gamma0*kx;
+    T3 = -(eta0+i)*gamma0*ky;
+	]]>
+</operator>
+<integration_vectors>wavefunction</integration_vectors>
+<dependencies>potential</dependencies>
+	<![CDATA[
+	dphi0_dt = T1[phi0] + T3[phi1] + (eta0+i)*(mu0-V1-U11*mod2(phi0)-U12*mod2(phi1))*phi0 + (eta0+i)*i*Omega0*phi1;
+	dphi1_dt = T2[phi1] + T3[phi0] + (eta0+i)*(mu0-V1-U12*mod2(phi0)-U11*mod2(phi1))*phi1 - (eta0+i)*i*Omega0*phi0;
+	]]>
+</operators>
+</integrate>
+
+<breakpoint filename="short_time_imag.xsil" format="hdf5">
+<dependencies>wavefunction </dependencies>
+</breakpoint>
+</sequence>
+<output filename="short_time_imag" format="hdf5">
+	<sampling_group basis="x y" initial_sample="no">
+	<moments>phit0real phit0imag phit1real phit1imag</moments>
+	<dependencies>wavefunction </dependencies>
+		<![CDATA[
+		phit0real = Re(phi0);
+		phit0imag = Im(phi0);
+    	phit1real = Re(phi1);
+    	phit1imag = Im(phi1);
+		]]>
+	</sampling_group>
+	
+	<sampling_group initial_sample="no">
+	<moments>norm</moments>
+	<dependencies>normalisation </dependencies>
+		<![CDATA[
+    	norm = Ncalc;
+		]]>
+	</sampling_group>
+	</output>
+</simulation>
